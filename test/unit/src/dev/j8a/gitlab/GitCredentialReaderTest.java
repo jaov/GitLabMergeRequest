@@ -6,6 +6,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.Assume;
 import org.junit.Test;
+import org.netbeans.api.keyring.Keyring;
+import org.netbeans.libs.git.GitURI;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
@@ -102,6 +104,37 @@ public class GitCredentialReaderTest {
 
         assertNull(GitCredentialReader.read(remote,
                 "/definitely/not/a/git/executable"));
+    }
+
+    @Test
+    public void readsPasswordFromNetBeansKeyring() throws Exception {
+        GitRemote remote = GitRemote.parse(
+                "https://gitlab.invalid/group/project.git");
+        String uri = new GitURI(remote.getRemoteUrl())
+                .setUser(null).setPass(null).toString();
+        String key = "guri_password" + uri;
+
+        try {
+            Keyring.save(key, "keyring-token".toCharArray(), "test credential");
+        } catch (RuntimeException ex) {
+            Assume.assumeNoException("Keyring is unavailable", ex);
+        }
+
+        try {
+            GitCredentialReader.Credential credential = GitCredentialReader.read(
+                    remote, "/definitely/not/a/git/executable");
+
+            assertNotNull(credential);
+            assertEquals("keyring-token", credential.token());
+            assertEquals(GitCredentialReader.Source.NETBEANS_KEYRING,
+                    credential.source());
+        } finally {
+            try {
+                Keyring.delete(key);
+            } catch (RuntimeException ex) {
+                // Ignore cleanup failures.
+            }
+        }
     }
 
     private static Path createHelper(String content) throws IOException {
