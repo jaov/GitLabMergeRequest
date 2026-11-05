@@ -14,6 +14,18 @@
                 <attr name="position" intvalue="960"/>
             </file>
         </folder>
+        <folder name="Versioning">
+            <folder name="Additional">
+                <file name="dev-j8a-gitlab-CreateMergeRequestAction.shadow">
+                    <attr name="originalFile" stringvalue="Actions/Git/dev-j8a-gitlab-CreateMergeRequestAction.instance"/>
+                    <attr name="position" intvalue="2400"/>
+                </file>
+                <file name="dev-j8a-gitlab-GitLabSettingsAction.shadow">
+                    <attr name="originalFile" stringvalue="Actions/Git/dev-j8a-gitlab-GitLabSettingsAction.instance"/>
+                    <attr name="position" intvalue="2410"/>
+                </file>
+            </folder>
+        </folder>
     </folder>
     <folder name="Projects">
         <folder name="Actions">

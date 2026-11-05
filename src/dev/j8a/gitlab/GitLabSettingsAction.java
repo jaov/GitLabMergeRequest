@@ -25,6 +25,12 @@ public final class GitLabSettingsAction extends AbstractAction {
     }
 
     @Override
+    public boolean isEnabled() {
+        return super.isEnabled() && ProjectDirectoryFinder.hasGitRepository(
+                Utilities.actionsGlobalContext());
+    }
+
+    @Override
     public void actionPerformed(ActionEvent event) {
         File projectDirectory = ProjectDirectoryFinder.find(
                 Utilities.actionsGlobalContext());

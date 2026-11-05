@@ -17,12 +17,16 @@ public class ActionRegistrationTest {
                 "dev.j8a.gitlab.CreateMergeRequestAction");
         assertNotNull(FileUtil.getConfigFile(
                 "Projects/Actions/dev-j8a-gitlab-CreateMergeRequestAction.shadow"));
+        assertNotNull(FileUtil.getConfigFile(
+                "Actions/Versioning/Additional/dev-j8a-gitlab-CreateMergeRequestAction.shadow"));
     }
 
     @Test
     public void settingsActionIsRegistered() throws Exception {
         assertAction("Actions/Git/dev-j8a-gitlab-GitLabSettingsAction.instance",
                 "dev.j8a.gitlab.GitLabSettingsAction");
+        assertNotNull(FileUtil.getConfigFile(
+                "Actions/Versioning/Additional/dev-j8a-gitlab-GitLabSettingsAction.shadow"));
     }
 
     private static void assertAction(String path, String className) throws Exception {

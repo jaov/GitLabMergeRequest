@@ -15,6 +15,11 @@ final class ProjectDirectoryFinder {
     private ProjectDirectoryFinder() {
     }
 
+    static boolean hasGitRepository(Lookup context) {
+        File directory = find(context);
+        return directory != null && GitRepositoryInfo.findRoot(directory) != null;
+    }
+
     static File find(Lookup context) {
         Project project = context.lookup(Project.class);
         if (project != null) {
