@@ -64,26 +64,38 @@ public final class CreateMergeRequestAction extends AbstractAction {
         String baseUrl = GitLabSettings.resolveBaseUrl(remote);
         String encodedProjectPath = remote.getEncodedProjectPath();
 
-        GitCredentialReader.Credential credential = null;
+        List<GitCredentialReader.Credential> credentials = List.of();
         if (GitLabSettings.getUseGitCredentials()) {
             StatusDisplayer.getDefault().setStatusText(NbBundle.getMessage(
                     CreateMergeRequestAction.class,
                     "CreateMergeRequestAction.preparing"));
             try {
-                credential = GitCredentialReader.read(remote);
+                credentials = GitCredentialReader.readCandidates(remote);
             } finally {
                 StatusDisplayer.getDefault().setStatusText("");
             }
         }
 
-        if (credential != null) {
-            GitLabClient client = new GitLabClient(baseUrl, credential.token());
-            loadProject(repository, preferredRemote, client, encodedProjectPath, true);
+        if (!credentials.isEmpty()) {
+            tryCredential(repository, preferredRemote, credentials, 0,
+                    encodedProjectPath);
             return;
         }
 
         SwingUtilities.invokeLater(() -> requestTokenAndContinue(
                 repository, preferredRemote, baseUrl, encodedProjectPath));
+    }
+
+    private void tryCredential(GitRepositoryInfo repository,
+            GitRepositoryInfo.Remote preferredRemote,
+            List<GitCredentialReader.Credential> credentials, int index,
+            String encodedProjectPath) {
+        GitRemote remote = preferredRemote.getRemote();
+        String baseUrl = GitLabSettings.resolveBaseUrl(remote);
+        GitLabClient client = new GitLabClient(baseUrl,
+                credentials.get(index).token());
+        loadProject(repository, preferredRemote, client, encodedProjectPath,
+                true, credentials, index);
     }
 
     private void requestTokenAndContinue(GitRepositoryInfo repository,
@@ -114,6 +126,15 @@ public final class CreateMergeRequestAction extends AbstractAction {
     private void loadProject(GitRepositoryInfo repository,
             GitRepositoryInfo.Remote preferredRemote, GitLabClient client,
             String encodedProjectPath, boolean allowCredentialFallback) {
+        loadProject(repository, preferredRemote, client, encodedProjectPath,
+                allowCredentialFallback, List.of(), 0);
+    }
+
+    private void loadProject(GitRepositoryInfo repository,
+            GitRepositoryInfo.Remote preferredRemote, GitLabClient client,
+            String encodedProjectPath, boolean allowCredentialFallback,
+            List<GitCredentialReader.Credential> credentials,
+            int credentialIndex) {
         ProgressHandle handle = ProgressHandle.createHandle(
                 NbBundle.getMessage(CreateMergeRequestAction.class,
                         "CreateMergeRequestAction.loading"));
@@ -128,11 +149,17 @@ public final class CreateMergeRequestAction extends AbstractAction {
         } catch (GitLabClientException ex) {
             if (allowCredentialFallback
                     && (ex.getStatusCode() == 401 || ex.getStatusCode() == 403)) {
-                GitRemote remote = preferredRemote.getRemote();
-                SwingUtilities.invokeLater(() -> requestTokenAndContinue(
-                        repository, preferredRemote,
-                        GitLabSettings.resolveBaseUrl(remote),
-                        encodedProjectPath));
+                if (credentialIndex + 1 < credentials.size()) {
+                    int nextIndex = credentialIndex + 1;
+                    RP.post(() -> tryCredential(repository, preferredRemote,
+                            credentials, nextIndex, encodedProjectPath));
+                } else {
+                    GitRemote remote = preferredRemote.getRemote();
+                    SwingUtilities.invokeLater(() -> requestTokenAndContinue(
+                            repository, preferredRemote,
+                            GitLabSettings.resolveBaseUrl(remote),
+                            encodedProjectPath));
+                }
             } else {
                 showGitLabErrorLater(ex, preferredRemote.getRemote(),
                         NbBundle.getMessage(CreateMergeRequestAction.class,

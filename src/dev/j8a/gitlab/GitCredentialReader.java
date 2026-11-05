@@ -7,7 +7,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.prefs.BackingStoreException;
@@ -42,15 +44,44 @@ final class GitCredentialReader {
     }
 
     static Credential read(GitRemote remote) {
-        return read(remote, "git");
+        List<Credential> candidates = readCandidates(remote);
+        return candidates.isEmpty() ? null : candidates.get(0);
     }
 
     static Credential read(GitRemote remote, String gitCommand) {
+        List<Credential> candidates = readCandidates(remote, gitCommand);
+        return candidates.isEmpty() ? null : candidates.get(0);
+    }
+
+    /**
+     * Returns every credential source in priority order. The caller can try
+     * the next one if the API rejects the first token.
+     */
+    static List<Credential> readCandidates(GitRemote remote) {
+        return readCandidates(remote, "git");
+    }
+
+    static List<Credential> readCandidates(GitRemote remote, String gitCommand) {
+        List<Credential> candidates = new ArrayList<>();
         Credential helperCredential = readFromGitHelper(remote, gitCommand);
         if (helperCredential != null) {
-            return helperCredential;
+            candidates.add(helperCredential);
         }
-        return readFromNetBeansKeyring(remote);
+        Credential keyringCredential = readFromNetBeansKeyring(remote);
+        if (keyringCredential != null
+                && !containsToken(candidates, keyringCredential.token())) {
+            candidates.add(keyringCredential);
+        }
+        return candidates;
+    }
+
+    private static boolean containsToken(List<Credential> candidates, String token) {
+        for (Credential candidate : candidates) {
+            if (candidate.token().equals(token)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Credential readFromGitHelper(GitRemote remote,
