@@ -1,0 +1,6 @@
+Manifest-Version: 1.0
+AutoUpdate-Show-In-Client: true
+OpenIDE-Module: dev.j8a.gitlab
+OpenIDE-Module-Layer: dev/j8a/gitlab/layer.xml
+OpenIDE-Module-Localizing-Bundle: dev/j8a/gitlab/Bundle.properties
+OpenIDE-Module-Specification-Version: 0.1

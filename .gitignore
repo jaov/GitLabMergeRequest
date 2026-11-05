@@ -1,0 +1,17 @@
+# NetBeans module build output
+build/
+dist/
+nbbuild/
+nbproject/private/
+
+# IDE and OS files
+.netbeans/
+.idea/
+*.iml
+*.class
+*.log
+.DS_Store
+Thumbs.db
+
+# Packaged module archives
+*.nbm
