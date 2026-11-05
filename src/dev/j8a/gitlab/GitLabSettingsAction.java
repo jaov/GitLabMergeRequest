@@ -4,15 +4,20 @@ import java.awt.event.ActionEvent;
 import java.io.File;
 import java.io.IOException;
 import javax.swing.AbstractAction;
+import javax.swing.SwingUtilities;
 import org.openide.DialogDisplayer;
 import org.openide.NotifyDescriptor;
 import org.openide.util.NbBundle;
+import org.openide.util.RequestProcessor;
 import org.openide.util.Utilities;
 
 /**
  * Opens the GitLab settings for the repository selected in the IDE.
  */
 public final class GitLabSettingsAction extends AbstractAction {
+
+    private static final RequestProcessor RP = new RequestProcessor(
+            GitLabSettingsAction.class);
 
     public GitLabSettingsAction() {
         super(NbBundle.getMessage(GitLabSettingsAction.class,
@@ -29,6 +34,10 @@ public final class GitLabSettingsAction extends AbstractAction {
             return;
         }
 
+        RP.post(() -> readRepositoryAndShow(projectDirectory));
+    }
+
+    private void readRepositoryAndShow(File projectDirectory) {
         GitRepositoryInfo repository;
         try {
             repository = GitRepositoryInfo.read(projectDirectory);
@@ -45,7 +54,8 @@ public final class GitLabSettingsAction extends AbstractAction {
             return;
         }
 
-        GitLabSettingsDialog.show(null, remote.getRemote());
+        SwingUtilities.invokeLater(() -> GitLabSettingsDialog.show(
+                null, remote.getRemote()));
     }
 
     private static void showError(String message) {
