@@ -9,13 +9,9 @@ import java.util.List;
 import javax.swing.AbstractAction;
 import javax.swing.SwingUtilities;
 import org.netbeans.api.progress.ProgressHandle;
-import org.netbeans.api.project.Project;
 import org.openide.DialogDisplayer;
 import org.openide.NotifyDescriptor;
 import org.openide.awt.HtmlBrowser.URLDisplayer;
-import org.openide.filesystems.FileObject;
-import org.openide.filesystems.FileUtil;
-import org.openide.loaders.DataObject;
 import org.openide.util.Lookup;
 import org.openide.util.NbBundle;
 import org.openide.util.RequestProcessor;
@@ -37,7 +33,7 @@ public final class CreateMergeRequestAction extends AbstractAction {
     @Override
     public void actionPerformed(ActionEvent event) {
         Lookup context = Utilities.actionsGlobalContext();
-        File projectDirectory = findProjectDirectory(context);
+        File projectDirectory = ProjectDirectoryFinder.find(context);
         if (projectDirectory == null) {
             showError(NbBundle.getMessage(CreateMergeRequestAction.class,
                     "CreateMergeRequestAction.noProject"));
@@ -192,36 +188,11 @@ public final class CreateMergeRequestAction extends AbstractAction {
         return branches.isEmpty() ? "" : branches.get(0);
     }
 
-    private static File findProjectDirectory(Lookup context) {
-        Project project = context.lookup(Project.class);
-        if (project != null) {
-            File directory = FileUtil.toFile(project.getProjectDirectory());
-            if (directory != null) {
-                return directory;
-            }
-        }
-
-        FileObject file = context.lookup(FileObject.class);
-        if (file != null) {
-            File directory = FileUtil.toFile(file);
-            if (directory != null) {
-                return directory;
-            }
-        }
-
-        DataObject dataObject = context.lookup(DataObject.class);
-        if (dataObject != null) {
-            File directory = FileUtil.toFile(dataObject.getPrimaryFile());
-            if (directory != null) {
-                return directory;
-            }
-        }
-        return null;
-    }
-
     private static void showSuccess(MergeRequestResult result) {
         String openLabel = NbBundle.getMessage(CreateMergeRequestAction.class,
                 "CreateMergeRequestAction.openInBrowser");
+        String closeLabel = NbBundle.getMessage(CreateMergeRequestAction.class,
+                "CreateMergeRequestAction.close");
         NotifyDescriptor descriptor = new NotifyDescriptor(
                 NbBundle.getMessage(CreateMergeRequestAction.class,
                         "CreateMergeRequestAction.success",
@@ -230,7 +201,7 @@ public final class CreateMergeRequestAction extends AbstractAction {
                         "CreateMergeRequestAction.successTitle"),
                 NotifyDescriptor.DEFAULT_OPTION,
                 NotifyDescriptor.INFORMATION_MESSAGE,
-                new Object[]{openLabel, NotifyDescriptor.CANCEL_OPTION},
+                new Object[]{openLabel, closeLabel},
                 openLabel);
 
         Object selected = DialogDisplayer.getDefault().notify(descriptor);

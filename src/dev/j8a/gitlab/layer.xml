@@ -8,6 +8,11 @@
                 <attr name="displayName" bundlevalue="dev.j8a.gitlab.Bundle#CreateMergeRequestAction.displayName"/>
                 <attr name="position" intvalue="950"/>
             </file>
+            <file name="dev-j8a-gitlab-GitLabSettingsAction.instance">
+                <attr name="instanceCreate" newvalue="dev.j8a.gitlab.GitLabSettingsAction"/>
+                <attr name="displayName" bundlevalue="dev.j8a.gitlab.Bundle#GitLabSettingsAction.displayName"/>
+                <attr name="position" intvalue="960"/>
+            </file>
         </folder>
     </folder>
     <folder name="Projects">
