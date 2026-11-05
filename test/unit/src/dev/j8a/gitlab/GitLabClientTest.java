@@ -43,8 +43,8 @@ public class GitLabClientTest {
     @Test
     public void readsProjectAndBranches() throws Exception {
         server.createContext("/api/v4/", exchange -> {
-            assertEquals(TOKEN,
-                    exchange.getRequestHeaders().getFirst("PRIVATE-TOKEN"));
+            assertEquals("Bearer " + TOKEN,
+                    exchange.getRequestHeaders().getFirst("Authorization"));
             String rawPath = exchange.getRequestURI().getRawPath();
             if (rawPath.equals("/api/v4/projects/" + PROJECT_PATH)) {
                 respond(exchange, 200, """

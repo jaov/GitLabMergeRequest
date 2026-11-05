@@ -109,9 +109,10 @@ public final class GitLabClient {
     }
 
     private HttpRequest.Builder requestBuilder(String path) {
+        // Bearer works for both personal access tokens and OAuth2 tokens.
         return HttpRequest.newBuilder(uri(path))
                 .timeout(REQUEST_TIMEOUT)
-                .header("PRIVATE-TOKEN", token);
+                .header("Authorization", "Bearer " + token);
     }
 
     private URI uri(String path) {
