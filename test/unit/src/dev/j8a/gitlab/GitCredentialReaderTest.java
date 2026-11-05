@@ -114,6 +114,22 @@ public class GitCredentialReaderTest {
                 .setUser(null).setPass(null).toString();
         String key = "guri_password" + uri;
 
+        assertKeyringCredential(remote, key);
+    }
+
+    @Test
+    public void readsPasswordFromLegacyHashedKeyringEntry() throws Exception {
+        GitRemote remote = GitRemote.parse(
+                "https://gitlab.invalid/group/project.git");
+        String uri = new GitURI(remote.getRemoteUrl())
+                .setUser(null).setPass(null).toString();
+        String key = "guri_password" + GitCredentialReader.sha1Hex(uri);
+
+        assertKeyringCredential(remote, key);
+    }
+
+    private static void assertKeyringCredential(GitRemote remote, String key)
+            throws Exception {
         try {
             Keyring.save(key, "keyring-token".toCharArray(), "test credential");
         } catch (RuntimeException ex) {
