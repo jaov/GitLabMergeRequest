@@ -82,10 +82,11 @@ Before showing the token field, the plugin tries, in order:
    libsecret, and `git credential-store`.
 2. The password saved by NetBeans' own Git module in the NetBeans keyring.
 
-Reused credentials are validated against the GitLab API. If the credential is
-missing, rejected, or cannot create merge requests, the plugin falls back to
-GitLab Settings. Disable reuse with **Use existing Git credentials when
-available** in the settings dialog.
+Reused credentials are validated against the GitLab API. If a source is
+missing or rejected, the next source is tried. If none works, or the token
+cannot create merge requests, the plugin falls back to GitLab Settings. Disable
+reuse with **Use existing Git credentials when available** in the settings
+dialog.
 
 The reused token must have the `api` scope to create merge requests. A token
 with only `read_repository`/`write_repository` can be used for Git operations
