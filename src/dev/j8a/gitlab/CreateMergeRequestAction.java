@@ -12,6 +12,7 @@ import org.netbeans.api.progress.ProgressHandle;
 import org.openide.DialogDisplayer;
 import org.openide.NotifyDescriptor;
 import org.openide.awt.HtmlBrowser.URLDisplayer;
+import org.openide.awt.StatusDisplayer;
 import org.openide.util.NbBundle;
 import org.openide.util.RequestProcessor;
 import org.openide.util.Utilities;
@@ -65,7 +66,14 @@ public final class CreateMergeRequestAction extends AbstractAction {
 
         GitCredentialReader.Credential credential = null;
         if (GitLabSettings.getUseGitCredentials()) {
-            credential = GitCredentialReader.read(remote);
+            StatusDisplayer.getDefault().setStatusText(NbBundle.getMessage(
+                    CreateMergeRequestAction.class,
+                    "CreateMergeRequestAction.preparing"));
+            try {
+                credential = GitCredentialReader.read(remote);
+            } finally {
+                StatusDisplayer.getDefault().setStatusText("");
+            }
         }
 
         if (credential != null) {
