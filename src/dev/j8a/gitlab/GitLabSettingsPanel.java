@@ -24,6 +24,7 @@ final class GitLabSettingsPanel extends JPanel {
     private final String host;
     private final JTextField baseUrlField = new JTextField();
     private final JPasswordField tokenField = new JPasswordField();
+    private final JCheckBox useGitCredentialsCheckBox;
     private final JCheckBox clearTokenCheckBox;
     private final boolean tokenAlreadyStored;
 
@@ -37,6 +38,10 @@ final class GitLabSettingsPanel extends JPanel {
         baseUrlField.setText(GitLabSettings.getBaseUrlOverride());
         baseUrlField.setToolTipText(NbBundle.getMessage(GitLabSettingsPanel.class,
                 "GitLabSettingsPanel.baseUrlTooltip", remote.getBaseUrl()));
+
+        useGitCredentialsCheckBox = new JCheckBox(NbBundle.getMessage(
+                GitLabSettingsPanel.class, "GitLabSettingsPanel.useGitCredentials"));
+        useGitCredentialsCheckBox.setSelected(GitLabSettings.getUseGitCredentials());
 
         clearTokenCheckBox = new JCheckBox(NbBundle.getMessage(
                 GitLabSettingsPanel.class, "GitLabSettingsPanel.clearToken"));
@@ -63,9 +68,17 @@ final class GitLabSettingsPanel extends JPanel {
         add(baseUrlField, gbc);
         row++;
 
+        gbc.gridx = 1;
+        gbc.gridy = row;
+        gbc.gridwidth = 2;
+        gbc.weightx = 1;
+        add(useGitCredentialsCheckBox, gbc);
+        row++;
+
         addLabel(gbc, row, "GitLabSettingsPanel.token");
         gbc.gridx = 1;
         gbc.gridy = row;
+        gbc.gridwidth = 1;
         gbc.weightx = 1;
         add(tokenField, gbc);
         row++;
@@ -106,6 +119,8 @@ final class GitLabSettingsPanel extends JPanel {
         };
         baseUrlField.getDocument().addDocumentListener(listener);
         tokenField.getDocument().addDocumentListener(listener);
+        useGitCredentialsCheckBox.addActionListener(
+                event -> changeSupport.fireChange());
         clearTokenCheckBox.addActionListener(event -> changeSupport.fireChange());
     }
 
@@ -124,6 +139,9 @@ final class GitLabSettingsPanel extends JPanel {
                 && !baseUrl.startsWith("http://")
                 && !baseUrl.startsWith("https://")) {
             return false;
+        }
+        if (useGitCredentialsCheckBox.isSelected()) {
+            return true;
         }
         if (clearTokenCheckBox.isSelected()) {
             return true;
@@ -144,6 +162,7 @@ final class GitLabSettingsPanel extends JPanel {
 
     void save() {
         GitLabSettings.setBaseUrlOverride(getBaseUrlOverride());
+        GitLabSettings.setUseGitCredentials(useGitCredentialsCheckBox.isSelected());
         if (clearTokenCheckBox.isSelected()) {
             GitLabSettings.setToken(host, null);
         } else if (!getToken().isEmpty()) {

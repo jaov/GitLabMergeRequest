@@ -3,6 +3,8 @@ package dev.j8a.gitlab;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class GitLabSettingsTest {
 
@@ -23,6 +25,20 @@ public class GitLabSettingsTest {
                     GitLabSettings.resolveBaseUrl(remote));
         } finally {
             GitLabSettings.setBaseUrlOverride(original);
+        }
+    }
+
+    @Test
+    public void gitCredentialReuseSettingDefaultsToTrueAndPersists() {
+        boolean original = GitLabSettings.getUseGitCredentials();
+        try {
+            GitLabSettings.setUseGitCredentials(true);
+            assertTrue(GitLabSettings.getUseGitCredentials());
+
+            GitLabSettings.setUseGitCredentials(false);
+            assertFalse(GitLabSettings.getUseGitCredentials());
+        } finally {
+            GitLabSettings.setUseGitCredentials(original);
         }
     }
 }

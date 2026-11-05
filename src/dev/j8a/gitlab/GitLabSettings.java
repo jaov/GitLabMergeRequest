@@ -12,6 +12,7 @@ public final class GitLabSettings {
 
     private static final String PREF_BASE_URL = "baseUrlOverride";
     private static final String PREF_DEFAULT_TARGET_BRANCH = "defaultTargetBranch";
+    private static final String PREF_USE_GIT_CREDENTIALS = "useGitCredentials";
     private static final String TOKEN_KEY_PREFIX = "gitlab.token.";
 
     private GitLabSettings() {
@@ -43,6 +44,14 @@ public final class GitLabSettings {
         } else {
             preferences().put(PREF_DEFAULT_TARGET_BRANCH, branch.trim());
         }
+    }
+
+    public static boolean getUseGitCredentials() {
+        return preferences().getBoolean(PREF_USE_GIT_CREDENTIALS, true);
+    }
+
+    public static void setUseGitCredentials(boolean value) {
+        preferences().putBoolean(PREF_USE_GIT_CREDENTIALS, value);
     }
 
     /**

@@ -12,7 +12,6 @@ import org.netbeans.api.progress.ProgressHandle;
 import org.openide.DialogDisplayer;
 import org.openide.NotifyDescriptor;
 import org.openide.awt.HtmlBrowser.URLDisplayer;
-import org.openide.util.Lookup;
 import org.openide.util.NbBundle;
 import org.openide.util.RequestProcessor;
 import org.openide.util.Utilities;
@@ -32,84 +31,112 @@ public final class CreateMergeRequestAction extends AbstractAction {
 
     @Override
     public void actionPerformed(ActionEvent event) {
-        Lookup context = Utilities.actionsGlobalContext();
-        File projectDirectory = ProjectDirectoryFinder.find(context);
+        File projectDirectory = ProjectDirectoryFinder.find(
+                Utilities.actionsGlobalContext());
         if (projectDirectory == null) {
             showError(NbBundle.getMessage(CreateMergeRequestAction.class,
                     "CreateMergeRequestAction.noProject"));
             return;
         }
+        RP.post(() -> start(projectDirectory));
+    }
 
+    private void start(File projectDirectory) {
         GitRepositoryInfo repository;
         try {
             repository = GitRepositoryInfo.read(projectDirectory);
         } catch (IOException ex) {
-            showError(messageOf(ex, NbBundle.getMessage(CreateMergeRequestAction.class,
+            showErrorLater(messageOf(ex, NbBundle.getMessage(
+                    CreateMergeRequestAction.class,
                     "CreateMergeRequestAction.noRepository")));
             return;
         }
 
         GitRepositoryInfo.Remote preferredRemote = repository.getPreferredRemote();
         if (preferredRemote == null) {
-            showError(NbBundle.getMessage(CreateMergeRequestAction.class,
+            showErrorLater(NbBundle.getMessage(CreateMergeRequestAction.class,
                     "CreateMergeRequestAction.noRemote"));
             return;
         }
 
         GitRemote remote = preferredRemote.getRemote();
-        String token = ensureToken(remote);
-        if (token == null) {
+        String baseUrl = GitLabSettings.resolveBaseUrl(remote);
+        String encodedProjectPath = remote.getEncodedProjectPath();
+
+        GitCredentialReader.Credential credential = null;
+        if (GitLabSettings.getUseGitCredentials()) {
+            credential = GitCredentialReader.read(remote);
+        }
+
+        if (credential != null) {
+            GitLabClient client = new GitLabClient(baseUrl, credential.token());
+            loadProject(repository, preferredRemote, client, encodedProjectPath, true);
             return;
         }
 
-        String baseUrl = GitLabSettings.resolveBaseUrl(remote);
-        String encodedProjectPath = remote.getEncodedProjectPath();
-        loadProject(repository, preferredRemote, baseUrl, token, encodedProjectPath);
+        SwingUtilities.invokeLater(() -> requestTokenAndContinue(
+                repository, preferredRemote, baseUrl, encodedProjectPath));
     }
 
-    private String ensureToken(GitRemote remote) {
+    private void requestTokenAndContinue(GitRepositoryInfo repository,
+            GitRepositoryInfo.Remote preferredRemote, String baseUrl,
+            String encodedProjectPath) {
+        GitRemote remote = preferredRemote.getRemote();
         String token = GitLabSettings.getToken(remote.getHost());
-        if (token != null && !token.isBlank()) {
-            return token;
-        }
-
-        if (!GitLabSettingsDialog.show(null, remote)) {
-            return null;
-        }
-
-        token = GitLabSettings.getToken(remote.getHost());
         if (token == null || token.isBlank()) {
-            showError(NbBundle.getMessage(CreateMergeRequestAction.class,
-                    "CreateMergeRequestAction.noToken"));
-            return null;
+            if (!GitLabSettingsDialog.show(null, remote)) {
+                return;
+            }
+            token = GitLabSettings.getToken(remote.getHost());
+            if (token == null || token.isBlank()) {
+                showError(NbBundle.getMessage(CreateMergeRequestAction.class,
+                        "CreateMergeRequestAction.noToken"));
+                return;
+            }
         }
-        return token;
+
+        String finalToken = token;
+        RP.post(() -> {
+            GitLabClient client = new GitLabClient(baseUrl, finalToken);
+            loadProject(repository, preferredRemote, client,
+                    encodedProjectPath, false);
+        });
     }
 
     private void loadProject(GitRepositoryInfo repository,
-            GitRepositoryInfo.Remote preferredRemote, String baseUrl, String token,
-            String encodedProjectPath) {
-        RP.post(() -> {
-            ProgressHandle handle = ProgressHandle.createHandle(
-                    NbBundle.getMessage(CreateMergeRequestAction.class,
-                            "CreateMergeRequestAction.loading"));
-            handle.start();
-            try {
-                GitLabClient client = new GitLabClient(baseUrl, token);
-                GitLabProject project = client.getProject(encodedProjectPath);
-                List<String> branches = client.getBranches(encodedProjectPath);
+            GitRepositoryInfo.Remote preferredRemote, GitLabClient client,
+            String encodedProjectPath, boolean allowCredentialFallback) {
+        ProgressHandle handle = ProgressHandle.createHandle(
+                NbBundle.getMessage(CreateMergeRequestAction.class,
+                        "CreateMergeRequestAction.loading"));
+        handle.start();
+        try {
+            GitLabProject project = client.getProject(encodedProjectPath);
+            List<String> branches = client.getBranches(encodedProjectPath);
 
-                SwingUtilities.invokeLater(() -> showDialog(
-                        repository, preferredRemote, client, project, branches,
+            SwingUtilities.invokeLater(() -> showDialog(
+                    repository, preferredRemote, client, project, branches,
+                    encodedProjectPath));
+        } catch (GitLabClientException ex) {
+            if (allowCredentialFallback
+                    && (ex.getStatusCode() == 401 || ex.getStatusCode() == 403)) {
+                GitRemote remote = preferredRemote.getRemote();
+                SwingUtilities.invokeLater(() -> requestTokenAndContinue(
+                        repository, preferredRemote,
+                        GitLabSettings.resolveBaseUrl(remote),
                         encodedProjectPath));
-            } catch (IOException ex) {
-                showErrorLater(messageOf(ex, NbBundle.getMessage(
-                        CreateMergeRequestAction.class,
-                        "CreateMergeRequestAction.loadFailed")));
-            } finally {
-                handle.finish();
+            } else {
+                showGitLabErrorLater(ex, preferredRemote.getRemote(),
+                        NbBundle.getMessage(CreateMergeRequestAction.class,
+                                "CreateMergeRequestAction.loadFailed"));
             }
-        });
+        } catch (IOException ex) {
+            showErrorLater(messageOf(ex, NbBundle.getMessage(
+                    CreateMergeRequestAction.class,
+                    "CreateMergeRequestAction.loadFailed")));
+        } finally {
+            handle.finish();
+        }
     }
 
     private void showDialog(GitRepositoryInfo repository,
@@ -159,6 +186,10 @@ public final class CreateMergeRequestAction extends AbstractAction {
                 MergeRequestResult result = client.createMergeRequest(
                         encodedProjectPath, request);
                 SwingUtilities.invokeLater(() -> showSuccess(result));
+            } catch (GitLabClientException ex) {
+                showGitLabErrorLater(ex, preferredRemote.getRemote(),
+                        NbBundle.getMessage(CreateMergeRequestAction.class,
+                                "CreateMergeRequestAction.createFailed"));
             } catch (IOException ex) {
                 showErrorLater(messageOf(ex, NbBundle.getMessage(
                         CreateMergeRequestAction.class,
@@ -213,6 +244,44 @@ public final class CreateMergeRequestAction extends AbstractAction {
                 showError(messageOf(ex, result.getWebUrl()));
             }
         }
+    }
+
+    private static void showGitLabErrorLater(Throwable throwable, GitRemote remote,
+            String fallback) {
+        SwingUtilities.invokeLater(() -> showGitLabError(throwable, remote, fallback));
+    }
+
+    private static void showGitLabError(Throwable throwable, GitRemote remote,
+            String fallback) {
+        if (throwable instanceof GitLabClientException clientException
+                && (clientException.getStatusCode() == 401
+                || clientException.getStatusCode() == 403)) {
+            String key = clientException.getStatusCode() == 403
+                    ? "CreateMergeRequestAction.scopeError"
+                    : "CreateMergeRequestAction.authError";
+            String openSettings = NbBundle.getMessage(
+                    CreateMergeRequestAction.class,
+                    "CreateMergeRequestAction.openSettings");
+            String close = NbBundle.getMessage(CreateMergeRequestAction.class,
+                    "CreateMergeRequestAction.close");
+            NotifyDescriptor descriptor = new NotifyDescriptor(
+                    NbBundle.getMessage(CreateMergeRequestAction.class, key,
+                            messageOf(clientException, "")),
+                    NbBundle.getMessage(CreateMergeRequestAction.class,
+                            "CreateMergeRequestAction.errorTitle"),
+                    NotifyDescriptor.DEFAULT_OPTION,
+                    NotifyDescriptor.ERROR_MESSAGE,
+                    new Object[]{openSettings, close},
+                    openSettings);
+
+            Object selected = DialogDisplayer.getDefault().notify(descriptor);
+            if (selected == openSettings) {
+                GitLabSettingsDialog.show(null, remote);
+            }
+            return;
+        }
+
+        showError(messageOf(throwable, fallback));
     }
 
     private static void showErrorLater(String message) {
