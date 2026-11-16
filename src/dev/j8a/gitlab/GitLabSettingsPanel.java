@@ -1,39 +1,59 @@
 package dev.j8a.gitlab;
 
+import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
 import javax.swing.event.ChangeListener;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import org.openide.util.ChangeSupport;
 import org.openide.util.NbBundle;
+import org.openide.util.RequestProcessor;
 
 /**
  * Settings form for the GitLab host detected from the current Git remote.
  */
 final class GitLabSettingsPanel extends JPanel {
 
+    private static final RequestProcessor RP = new RequestProcessor(
+            GitLabSettingsPanel.class);
+
+    private record TokenCandidate(String token, String source) {
+    }
+
     private final ChangeSupport changeSupport = new ChangeSupport(this);
+    private final GitRemote remote;
     private final String host;
     private final JTextField baseUrlField = new JTextField();
     private final JPasswordField tokenField = new JPasswordField();
     private final JCheckBox useGitCredentialsCheckBox;
     private final JCheckBox clearTokenCheckBox;
+    private final JButton testButton;
+    private final JLabel testStatus = new JLabel();
     private final boolean tokenAlreadyStored;
 
     GitLabSettingsPanel(GitRemote remote) {
         super(new GridBagLayout());
         setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
 
+        this.remote = remote;
         host = remote.getHost();
         tokenAlreadyStored = GitLabSettings.hasToken(host);
+        testButton = new JButton(NbBundle.getMessage(
+                GitLabSettingsPanel.class, "GitLabSettingsPanel.test"));
 
         baseUrlField.setText(GitLabSettings.getBaseUrlOverride());
         baseUrlField.setToolTipText(NbBundle.getMessage(GitLabSettingsPanel.class,
@@ -99,7 +119,18 @@ final class GitLabSettingsPanel extends JPanel {
             gbc.gridy = row;
             gbc.gridwidth = 2;
             add(clearTokenCheckBox, gbc);
+            row++;
         }
+
+        gbc.gridx = 1;
+        gbc.gridy = row;
+        gbc.gridwidth = 2;
+        gbc.weightx = 1;
+        JPanel testPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        testPanel.add(testButton);
+        testPanel.add(Box.createHorizontalStrut(8));
+        testPanel.add(testStatus);
+        add(testPanel, gbc);
 
         DocumentListener listener = new DocumentListener() {
             @Override
@@ -122,6 +153,7 @@ final class GitLabSettingsPanel extends JPanel {
         useGitCredentialsCheckBox.addActionListener(
                 event -> changeSupport.fireChange());
         clearTokenCheckBox.addActionListener(event -> changeSupport.fireChange());
+        testButton.addActionListener(event -> testConnection());
     }
 
     private void addLabel(GridBagConstraints gbc, int row, String key) {
@@ -168,6 +200,116 @@ final class GitLabSettingsPanel extends JPanel {
         } else if (!getToken().isEmpty()) {
             GitLabSettings.setToken(host, getToken());
         }
+    }
+
+    private void testConnection() {
+        String typedToken = getToken();
+        String storedToken = GitLabSettings.getToken(host);
+        boolean useGitCredentials = useGitCredentialsCheckBox.isSelected();
+        String baseUrl = getBaseUrlOverride().isEmpty()
+                ? remote.getBaseUrl() : getBaseUrlOverride();
+        String encodedProjectPath = remote.getEncodedProjectPath();
+
+        testButton.setEnabled(false);
+        testStatus.setText(NbBundle.getMessage(GitLabSettingsPanel.class,
+                "GitLabSettingsPanel.testing"));
+
+        RP.post(() -> {
+            try {
+                List<TokenCandidate> candidates = new ArrayList<>();
+                if (!typedToken.isEmpty()) {
+                    candidates.add(new TokenCandidate(typedToken,
+                            NbBundle.getMessage(GitLabSettingsPanel.class,
+                                    "GitLabSettingsPanel.customToken")));
+                } else {
+                    if (storedToken != null && !storedToken.isBlank()) {
+                        candidates.add(new TokenCandidate(storedToken,
+                                NbBundle.getMessage(GitLabSettingsPanel.class,
+                                        "GitLabSettingsPanel.savedToken")));
+                    }
+                    if (useGitCredentials) {
+                        for (GitCredentialReader.Credential credential
+                                : GitCredentialReader.readCandidates(remote)) {
+                            candidates.add(new TokenCandidate(credential.token(),
+                                    sourceLabel(credential.source())));
+                        }
+                    }
+                }
+
+                if (candidates.isEmpty()) {
+                    setTestStatus(NbBundle.getMessage(GitLabSettingsPanel.class,
+                            "GitLabSettingsPanel.noCredential"));
+                    return;
+                }
+
+                GitLabClientException lastApiError = null;
+                for (TokenCandidate candidate : candidates) {
+                    try {
+                        GitLabClient client = new GitLabClient(baseUrl,
+                                candidate.token());
+                        GitLabProject project = client.getProject(
+                                encodedProjectPath);
+                        setTestStatus(NbBundle.getMessage(
+                                GitLabSettingsPanel.class,
+                                "GitLabSettingsPanel.connected",
+                                project.getPathWithNamespace(),
+                                candidate.source()));
+                        return;
+                    } catch (GitLabClientException ex) {
+                        lastApiError = ex;
+                        if (ex.getStatusCode() != 401
+                                && ex.getStatusCode() != 403) {
+                            setTestStatus(apiError(ex));
+                            return;
+                        }
+                    } catch (IOException ex) {
+                        setTestStatus(NbBundle.getMessage(
+                                GitLabSettingsPanel.class,
+                                "GitLabSettingsPanel.connectionError",
+                                ex.getMessage()));
+                        return;
+                    }
+                }
+
+                if (lastApiError != null) {
+                    setTestStatus(apiError(lastApiError));
+                } else {
+                    setTestStatus(NbBundle.getMessage(GitLabSettingsPanel.class,
+                            "GitLabSettingsPanel.noCredential"));
+                }
+            } catch (RuntimeException ex) {
+                setTestStatus(NbBundle.getMessage(GitLabSettingsPanel.class,
+                        "GitLabSettingsPanel.connectionError",
+                        ex.getMessage()));
+            }
+        });
+    }
+
+    private static String apiError(GitLabClientException exception) {
+        String message = NbBundle.getMessage(GitLabSettingsPanel.class,
+                "GitLabSettingsPanel.apiError",
+                exception.getStatusCode(), exception.getMessage());
+        if (exception.getStatusCode() == 403) {
+            return NbBundle.getMessage(GitLabSettingsPanel.class,
+                    "GitLabSettingsPanel.scopeHint", message);
+        }
+        return message;
+    }
+
+    private static String sourceLabel(GitCredentialReader.Source source) {
+        if (source == GitCredentialReader.Source.GIT_HELPER) {
+            return NbBundle.getMessage(GitLabSettingsPanel.class,
+                    "GitLabSettingsPanel.source.gitHelper");
+        }
+        return NbBundle.getMessage(GitLabSettingsPanel.class,
+                "GitLabSettingsPanel.source.netbeansKeyring");
+    }
+
+    private void setTestStatus(String message) {
+        SwingUtilities.invokeLater(() -> {
+            testStatus.setText(message);
+            testButton.setEnabled(true);
+        });
     }
 
     void addChangeListener(ChangeListener listener) {

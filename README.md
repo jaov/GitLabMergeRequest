@@ -4,8 +4,8 @@ A small Apache NetBeans module for creating GitLab merge requests from the IDE.
 
 ## Current features
 
-- **Create Merge Request...** action under **Team → Git** and in the project
-  context menu.
+- **Create Merge Request...** action directly in the **Team** menu and in the
+  project context menu.
 - Detects the Git repository, active branch, remote, and last commit.
 - Supports GitLab.com and self-hosted GitLab instances.
 - Reads the project path from HTTPS, HTTP, SSH, `git://`, and scp-like remotes
@@ -21,12 +21,13 @@ A small Apache NetBeans module for creating GitLab merge requests from the IDE.
   nothing.
 - Stores the personal access token in the NetBeans keyring.
 - Optional base URL override for GitLab installations served under a path.
+- **Test Connection** button in GitLab Settings to verify the effective
+  credential and show which source produced it.
 
 ## Requirements
 
-- Apache NetBeans 30 (built against it)
-- JDK 17 or newer (the module targets Java 17; NetBeans 30 itself requires
-  Java 21+)
+- Apache NetBeans 23 or newer
+- JDK 17 or newer
 - A GitLab personal access token with the `api` scope
 - Git installed on `PATH` if you use **Push current branch first**
 
@@ -62,7 +63,7 @@ to launch a development IDE with the module installed.
 
 1. Open a project whose Git remote points at GitLab.
 2. Right-click the project and choose **Create Merge Request...**, or use
-   **Team → Git → Create Merge Request...**.
+   **Team → Create Merge Request...**.
 3. On first use, the plugin tries to reuse an existing Git credential. If none
    is available, enter a GitLab personal access token. The token is saved in
    the NetBeans keyring.
@@ -70,8 +71,8 @@ to launch a development IDE with the module installed.
 5. Choose the merge request options and click **OK**.
 6. When the merge request is created, use **Open in Browser** to view it.
 
-Use **Team → Git → GitLab Settings...** to change the token, clear it, or set a
-base URL override.
+Use **Team → GitLab Settings...** to change the token, clear it, set a base URL
+override, or test the connection.
 
 ## Credential reuse
 
@@ -81,12 +82,19 @@ Before showing the token field, the plugin tries, in order:
    helpers such as `glab auth git-credential`, Git Credential Manager,
    libsecret, and `git credential-store`.
 2. The password saved by NetBeans' own Git module in the NetBeans keyring.
+   The reader uses the Git module's `recent_guri` connection entries to recover
+   the exact stored URI and username, and also tries `.git`/trailing-slash
+   variants.
 
 Reused credentials are validated against the GitLab API. If a source is
 missing or rejected, the next source is tried. If none works, or the token
 cannot create merge requests, the plugin falls back to GitLab Settings. Disable
 reuse with **Use existing Git credentials when available** in the settings
 dialog.
+
+The **Test Connection** button in GitLab Settings checks the effective token
+and reports whether it came from the Git credential helper, the NetBeans Git
+keyring, the saved GitLab Settings token, or the token field.
 
 The reused token must have the `api` scope to create merge requests. A token
 with only `read_repository`/`write_repository` can be used for Git operations
@@ -101,6 +109,8 @@ but will be rejected when creating the merge request.
   for example `https://gitlab.example.com/gitlab`.
 - **Personal access token** — stored in the NetBeans keyring, not in plain
   preferences.
+- **Test Connection** — verifies the effective credential against the GitLab
+  project and reports `200`, `401`, or `403`.
 
 ## Notes and limitations
 

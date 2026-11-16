@@ -10,8 +10,11 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.prefs.BackingStoreException;
 import java.util.prefs.Preferences;
 import org.netbeans.api.keyring.Keyring;
@@ -36,6 +39,12 @@ final class GitCredentialReader {
     record Credential(String username, String token, Source source) {
     }
 
+    private record StoredConnection(String guriString, String user,
+            boolean saveCredentials) {
+    }
+
+    private static final Logger LOG = Logger.getLogger(
+            GitCredentialReader.class.getName());
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
     private static final String NETBEANS_GIT_PREFERENCES = "org/netbeans/modules/git";
     private static final String GIT_PASSWORD_KEY = "guri_password";
@@ -65,12 +74,18 @@ final class GitCredentialReader {
         List<Credential> candidates = new ArrayList<>();
         Credential helperCredential = readFromGitHelper(remote, gitCommand);
         if (helperCredential != null) {
+            LOG.fine("Git credential helper returned a credential");
             candidates.add(helperCredential);
+        } else {
+            LOG.fine("Git credential helper returned no credential");
         }
         Credential keyringCredential = readFromNetBeansKeyring(remote);
         if (keyringCredential != null
                 && !containsToken(candidates, keyringCredential.token())) {
+            LOG.fine("NetBeans Git keyring returned a credential");
             candidates.add(keyringCredential);
+        } else if (keyringCredential == null) {
+            LOG.fine("NetBeans Git keyring returned no credential");
         }
         return candidates;
     }
@@ -91,6 +106,7 @@ final class GitCredentialReader {
             return null;
         }
 
+        LOG.log(Level.FINE, "Reading Git credential for {0}", url);
         ProcessBuilder builder = new ProcessBuilder(gitCommand,
                 "credential", "fill");
         builder.redirectError(ProcessBuilder.Redirect.DISCARD);
@@ -101,6 +117,7 @@ final class GitCredentialReader {
         try {
             process = builder.start();
         } catch (IOException ex) {
+            LOG.log(Level.FINE, "Cannot start git credential helper", ex);
             return null;
         }
 
@@ -111,11 +128,14 @@ final class GitCredentialReader {
             }
 
             if (!process.waitFor(TIMEOUT.toSeconds(), TimeUnit.SECONDS)) {
+                LOG.fine("Git credential helper timed out");
                 process.destroyForcibly();
                 return null;
             }
 
             if (process.exitValue() != 0) {
+                LOG.log(Level.FINE, "Git credential helper exited with {0}",
+                        process.exitValue());
                 return null;
             }
 
@@ -163,6 +183,7 @@ final class GitCredentialReader {
         try {
             base = new GitURI(remote.getRemoteUrl());
         } catch (URISyntaxException ex) {
+            LOG.log(Level.FINE, "Cannot parse Git remote URI", ex);
             return null;
         }
 
@@ -171,20 +192,46 @@ final class GitCredentialReader {
             users.add(base.getUser());
         }
 
-        String withoutCredentials = base.setUser(null).setPass(null).toString();
-        users.addAll(readRecentGuriUsers(withoutCredentials));
-
         Set<String> uriCandidates = new LinkedHashSet<>();
-        uriCandidates.add(withoutCredentials);
-        for (String user : users) {
-            uriCandidates.add(base.setUser(user).setPass(null).toString());
+        for (StoredConnection stored : readStoredConnections()) {
+            if (!stored.saveCredentials()) {
+                continue;
+            }
+            if (!matchesRemote(stored.guriString(), remote)) {
+                continue;
+            }
+
+            LOG.log(Level.FINE, "Matching NetBeans Git connection: {0}", stored);
+            if (stored.user() != null && !stored.user().isBlank()) {
+                users.add(stored.user());
+            }
+            try {
+                GitURI storedUri = new GitURI(stored.guriString());
+                if (stored.user() != null && !stored.user().isBlank()) {
+                    uriCandidates.add(storedUri.setUser(stored.user())
+                            .setPass(null).toString());
+                }
+                uriCandidates.add(storedUri.setUser(null).setPass(null).toString());
+            } catch (URISyntaxException ex) {
+                LOG.log(Level.FINE, "Cannot parse stored NetBeans Git URI", ex);
+            }
         }
 
+        String withoutCredentials = base.setUser(null).setPass(null).toString();
+        uriCandidates.addAll(uriVariants(withoutCredentials));
+        for (String user : users) {
+            uriCandidates.addAll(uriVariants(
+                    base.setUser(user).setPass(null).toString()));
+        }
+
+        LOG.log(Level.FINE, "NetBeans keyring candidates: {0}", uriCandidates);
         for (String uri : uriCandidates) {
             char[] value = readPassword(GIT_PASSWORD_KEY, uri);
             if (value != null && value.length > 0) {
                 String token = new String(value);
                 if (!token.isBlank()) {
+                    LOG.log(Level.FINE,
+                            "NetBeans keyring credential found for {0}", uri);
                     return new Credential(null, token, Source.NETBEANS_KEYRING);
                 }
             }
@@ -206,6 +253,7 @@ final class GitCredentialReader {
             String hashed = sha1Hex(uri);
             return hashed == null ? null : Keyring.read(key + hashed);
         } catch (RuntimeException ex) {
+            LOG.log(Level.FINE, "Cannot read NetBeans keyring entry", ex);
             return null;
         }
     }
@@ -231,13 +279,8 @@ final class GitCredentialReader {
         }
     }
 
-    /**
-     * Reads the NetBeans Git module's recent connection entries to recover the
-     * username that is part of the keyring key. This is intentionally
-     * best-effort because the preference format is internal.
-     */
-    private static Set<String> readRecentGuriUsers(String uriWithoutCredentials) {
-        Set<String> users = new LinkedHashSet<>();
+    private static List<StoredConnection> readStoredConnections() {
+        List<StoredConnection> result = new ArrayList<>();
         try {
             Preferences preferences = NbPreferences.root()
                     .node(NETBEANS_GIT_PREFERENCES);
@@ -247,22 +290,88 @@ final class GitCredentialReader {
                 }
                 String value = preferences.get(key, "");
                 String[] parts = value.split("<=~=>", -1);
-                if (parts.length < 2) {
+                if (parts.length == 0) {
                     continue;
                 }
                 String guri = parts[0].trim();
-                if (!guri.equals(uriWithoutCredentials)) {
+                if (guri.isEmpty()) {
                     continue;
                 }
-                String user = parts[1].trim();
-                if (!user.isEmpty()) {
-                    users.add(user);
-                }
+                String user = parts.length > 1 && !parts[1].trim().isEmpty()
+                        ? parts[1].trim() : null;
+                boolean saveCredentials = parts.length <= 2
+                        || "1".equals(parts[2].trim());
+                result.add(new StoredConnection(guri, user, saveCredentials));
             }
         } catch (RuntimeException | BackingStoreException ex) {
-            // Preferences may be unavailable in tests or restricted environments.
+            LOG.log(Level.FINE, "Cannot read NetBeans Git preferences", ex);
         }
-        return users;
+        return result;
+    }
+
+    private static boolean matchesRemote(String storedUri, GitRemote remote) {
+        String stored = normalizeForMatch(storedUri);
+        String current = normalizeForMatch(remote.getRemoteUrl());
+        return stored != null && stored.equals(current);
+    }
+
+    static String normalizeForMatch(String uri) {
+        try {
+            GitURI gitUri = new GitURI(uri);
+            String scheme = gitUri.getScheme() == null
+                    ? "" : gitUri.getScheme().toLowerCase(Locale.ROOT);
+            String host = gitUri.getHost() == null
+                    ? "" : gitUri.getHost().toLowerCase(Locale.ROOT);
+            int port = gitUri.getPort();
+            String path = gitUri.getPath();
+            if (path == null) {
+                path = "";
+            }
+            while (path.startsWith("/")) {
+                path = path.substring(1);
+            }
+            while (path.endsWith("/")) {
+                path = path.substring(0, path.length() - 1);
+            }
+            if (path.endsWith(".git")) {
+                path = path.substring(0, path.length() - 4);
+            }
+
+            StringBuilder result = new StringBuilder();
+            result.append(scheme).append("://").append(host);
+            if (port > 0) {
+                result.append(':').append(port);
+            }
+            result.append('/').append(path);
+            return result.toString();
+        } catch (URISyntaxException ex) {
+            return null;
+        }
+    }
+
+    static Set<String> uriVariants(String uri) {
+        Set<String> result = new LinkedHashSet<>();
+        if (uri == null || uri.isBlank()) {
+            return result;
+        }
+
+        String trimmed = stripTrailingSlash(uri);
+        result.add(trimmed);
+        result.add(trimmed + "/");
+        if (trimmed.endsWith(".git")) {
+            result.add(trimmed.substring(0, trimmed.length() - 4));
+        } else {
+            result.add(trimmed + ".git");
+        }
+        return result;
+    }
+
+    private static String stripTrailingSlash(String value) {
+        int end = value.length();
+        while (end > 0 && value.charAt(end - 1) == '/') {
+            end--;
+        }
+        return value.substring(0, end);
     }
 
     private static String webUrlWithGitSuffix(GitRemote remote) {

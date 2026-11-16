@@ -4,14 +4,18 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
+import java.util.prefs.Preferences;
 import org.junit.Assume;
 import org.junit.Test;
 import org.netbeans.api.keyring.Keyring;
 import org.netbeans.libs.git.GitURI;
+import org.openide.util.NbPreferences;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 public class GitCredentialReaderTest {
 
@@ -36,6 +40,26 @@ public class GitCredentialReaderTest {
     public void ignoresQuitResponse() {
         assertNull(GitCredentialReader.parse(
                 "username=oauth2\npassword=secret\nquit=1\n"));
+    }
+
+    @Test
+    public void normalizesRemoteVariantsForKeyringMatching() {
+        assertEquals("https://gitlab.com/group/project",
+                GitCredentialReader.normalizeForMatch(
+                        "https://user@gitlab.com/group/project.git/"));
+        assertEquals("https://gitlab.com/group/project",
+                GitCredentialReader.normalizeForMatch(
+                        "https://gitlab.com/group/project"));
+    }
+
+    @Test
+    public void createsGitSuffixAndSlashVariants() {
+        Set<String> variants = GitCredentialReader.uriVariants(
+                "https://gitlab.com/group/project.git");
+
+        assertTrue(variants.contains("https://gitlab.com/group/project.git"));
+        assertTrue(variants.contains("https://gitlab.com/group/project"));
+        assertTrue(variants.contains("https://gitlab.com/group/project.git/"));
     }
 
     @Test
@@ -126,6 +150,50 @@ public class GitCredentialReaderTest {
         String key = "guri_password" + GitCredentialReader.sha1Hex(uri);
 
         assertKeyringCredential(remote, key);
+    }
+
+    @Test
+    public void readsCredentialFromRecentGuriEntry() throws Exception {
+        GitRemote remote = GitRemote.parse(
+                "https://gitlab.invalid/group/project.git");
+        Preferences preferences = NbPreferences.root()
+                .node("org/netbeans/modules/git");
+        String preferenceKey = "recent_guri.0";
+        String original = preferences.get(preferenceKey, null);
+
+        String guri = "https://gitlab.invalid/group/project";
+        String user = "testuser";
+        String key = "guri_password" + new GitURI(guri)
+                .setUser(user).setPass(null).toString();
+
+        try {
+            preferences.put(preferenceKey,
+                    guri + "<=~=>" + user + "<=~=>1<=~=>0<=~=>");
+            Keyring.save(key, "recent-token".toCharArray(), "test credential");
+        } catch (RuntimeException ex) {
+            Assume.assumeNoException("Keyring is unavailable", ex);
+        }
+
+        try {
+            GitCredentialReader.Credential credential = GitCredentialReader.read(
+                    remote, "/definitely/not/a/git/executable");
+
+            assertNotNull(credential);
+            assertEquals("recent-token", credential.token());
+            assertEquals(GitCredentialReader.Source.NETBEANS_KEYRING,
+                    credential.source());
+        } finally {
+            try {
+                Keyring.delete(key);
+            } catch (RuntimeException ex) {
+                // Ignore cleanup failures.
+            }
+            if (original == null) {
+                preferences.remove(preferenceKey);
+            } else {
+                preferences.put(preferenceKey, original);
+            }
+        }
     }
 
     private static void assertKeyringCredential(GitRemote remote, String key)

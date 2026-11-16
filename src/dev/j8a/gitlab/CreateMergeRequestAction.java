@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import javax.swing.AbstractAction;
 import javax.swing.SwingUtilities;
 import org.netbeans.api.progress.ProgressHandle;
@@ -22,6 +24,8 @@ import org.openide.util.Utilities;
  */
 public final class CreateMergeRequestAction extends AbstractAction {
 
+    private static final Logger LOG = Logger.getLogger(
+            CreateMergeRequestAction.class.getName());
     private static final RequestProcessor RP = new RequestProcessor(
             CreateMergeRequestAction.class);
 
@@ -98,6 +102,9 @@ public final class CreateMergeRequestAction extends AbstractAction {
             String encodedProjectPath) {
         GitRemote remote = preferredRemote.getRemote();
         String baseUrl = GitLabSettings.resolveBaseUrl(remote);
+        LOG.log(Level.FINE, "Trying credential source {0} ({1}/{2})",
+                new Object[]{credentials.get(index).source(),
+                    index + 1, credentials.size()});
         GitLabClient client = new GitLabClient(baseUrl,
                 credentials.get(index).token());
         loadProject(repository, preferredRemote, client, encodedProjectPath,
@@ -153,6 +160,12 @@ public final class CreateMergeRequestAction extends AbstractAction {
                     repository, preferredRemote, client, project, branches,
                     encodedProjectPath));
         } catch (GitLabClientException ex) {
+            LOG.log(Level.FINE,
+                    "GitLab API rejected credential source {0} with HTTP {1}",
+                    new Object[]{credentials.isEmpty()
+                            ? "custom token"
+                            : credentials.get(credentialIndex).source(),
+                        ex.getStatusCode()});
             if (allowCredentialFallback
                     && (ex.getStatusCode() == 401 || ex.getStatusCode() == 403)) {
                 if (credentialIndex + 1 < credentials.size()) {
@@ -228,6 +241,9 @@ public final class CreateMergeRequestAction extends AbstractAction {
                         encodedProjectPath, request);
                 SwingUtilities.invokeLater(() -> showSuccess(result));
             } catch (GitLabClientException ex) {
+                LOG.log(Level.FINE,
+                        "Merge request creation failed with HTTP {0}",
+                        ex.getStatusCode());
                 showGitLabErrorLater(ex, preferredRemote.getRemote(),
                         NbBundle.getMessage(CreateMergeRequestAction.class,
                                 "CreateMergeRequestAction.createFailed"));
